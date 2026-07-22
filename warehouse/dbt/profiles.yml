@@ -1,0 +1,8 @@
+maritimeguard:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      # resolved relative to the dbt project dir (warehouse/dbt/)
+      path: ../maritimeguard.duckdb
+      threads: 4

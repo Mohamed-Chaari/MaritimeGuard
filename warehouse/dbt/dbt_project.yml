@@ -1,0 +1,15 @@
+name: maritimeguard
+version: "1.0.0"
+config-version: 2
+profile: maritimeguard
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+test-paths: ["tests"]
+
+models:
+  maritimeguard:
+    bronze: { +materialized: table, +schema: bronze }
+    silver: { +materialized: table, +schema: silver }
+    gold:   { +materialized: table, +schema: gold }

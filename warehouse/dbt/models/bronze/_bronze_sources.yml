@@ -1,0 +1,22 @@
+version: 2
+sources:
+  - name: raw
+    schema: bronze
+    description: >
+      Raw landing zone (bronze). AIS vessel positions from MarineCadastre.gov
+      and Digitraffic.fi, marine weather from Open-Meteo, port reference from
+      NGA World Port Index.
+    tables:
+      - name: raw_vessel_positions
+        description: >
+          AIS telemetry: vessel positions with MMSI, coordinates, speed,
+          course, heading, vessel metadata. Historical from MarineCadastre
+          GeoParquet, real-time from Digitraffic.fi API.
+      - name: raw_marine_weather
+        description: >
+          Hourly marine weather at major chokepoints. Wave height, wind speed,
+          ocean currents from Open-Meteo Marine + Weather APIs.
+      - name: raw_ports
+        description: >
+          NGA World Port Index (Publication 150). Port coordinates, depths,
+          facilities, capacity. ~3,700 ports worldwide. Static reference data.

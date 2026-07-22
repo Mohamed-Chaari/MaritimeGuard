@@ -1,0 +1,134 @@
+version: 2
+
+models:
+  # ---------- Fact tables ----------
+  - name: fct_vessel_positions
+    description: "Vessel position snapshots with Haversine distance. Grain: one row per (vessel_key, position_ts)."
+    columns:
+      - name: vessel_key
+        tests:
+          - not_null
+          - relationships: { to: ref('dim_vessels'), field: vessel_key }
+      - name: position_ts
+        tests: [not_null]
+      - name: latitude
+        tests:
+          - not_null
+          - accepted_range: { min_value: -90, max_value: 90 }
+      - name: longitude
+        tests:
+          - not_null
+          - accepted_range: { min_value: -180, max_value: 180 }
+      - name: sog
+        tests:
+          - accepted_range: { min_value: 0, max_value: 102.3 }  # AIS max SOG
+      - name: cog
+        tests:
+          - accepted_range: { min_value: 0, max_value: 360 }
+      - name: distance_nm
+        tests:
+          - accepted_range: { min_value: 0 }
+
+  - name: fct_port_calls
+    description: "Port call events. Grain: one row per vessel port call."
+    columns:
+      - name: vessel_key
+        tests:
+          - not_null
+          - relationships: { to: ref('dim_vessels'), field: vessel_key }
+      - name: port_key
+        tests:
+          - not_null
+          - relationships: { to: ref('dim_ports'), field: port_key }
+      - name: arrival_ts
+        tests: [not_null]
+      - name: duration_hours
+        tests:
+          - accepted_range: { min_value: 0 }
+
+  - name: fct_ais_anomalies
+    description: "Flagged AIS anomalies (blackouts, speed jumps). Grain: one row per anomaly event."
+    columns:
+      - name: vessel_key
+        tests:
+          - not_null
+          - relationships: { to: ref('dim_vessels'), field: vessel_key }
+      - name: anomaly_ts
+        tests: [not_null]
+      - name: anomaly_type
+        tests: [not_null]
+      - name: risk_score
+        tests:
+          - not_null
+          - accepted_range: { min_value: 0, max_value: 100 }
+      - name: time_gap_minutes
+        tests:
+          - accepted_range: { min_value: 0 }
+      - name: distance_gap_nm
+        tests:
+          - accepted_range: { min_value: 0 }
+
+  # ---------- Dimension tables ----------
+  - name: dim_vessels
+    description: "Vessel dimension (Type 1). Deduplicated on MMSI. SCD2 in snapshots/dim_vessels_scd2."
+    columns:
+      - name: vessel_key
+        tests: [unique, not_null]
+      - name: vessel_type_desc
+        tests: [not_null]
+
+  - name: dim_ports
+    description: "Port dimension from NGA World Port Index."
+    columns:
+      - name: port_key
+        tests: [unique, not_null]
+      - name: port_name
+        tests: [not_null]
+      - name: country
+        tests: [not_null]
+      - name: latitude
+        tests:
+          - not_null
+          - accepted_range: { min_value: -90, max_value: 90 }
+      - name: longitude
+        tests:
+          - not_null
+          - accepted_range: { min_value: -180, max_value: 180 }
+      - name: channel_depth_m
+        tests:
+          - accepted_range: { min_value: 0 }
+
+  - name: dim_time
+    description: "Hourly time dimension (2024-2025, 17,520 rows)."
+    columns:
+      - name: time_key
+        tests: [unique, not_null]
+      - name: hour
+        tests:
+          - accepted_range: { min_value: 0, max_value: 23 }
+      - name: month
+        tests:
+          - accepted_range: { min_value: 1, max_value: 12 }
+
+  - name: dim_weather_zones
+    description: "Maritime chokepoint and shipping zone reference."
+    columns:
+      - name: zone_key
+        tests: [unique, not_null]
+      - name: zone_name
+        tests: [unique, not_null]
+
+  - name: obt_vessel_tracking
+    description: "Wide denormalized vessel tracking table for BI (no runtime joins)."
+    columns:
+      - name: vessel_key
+        tests: [not_null]
+      - name: position_ts
+        tests: [not_null]
+
+snapshots:
+  - name: dim_vessels_scd2
+    description: "SCD Type 2 vessel dimension. dbt maintains dbt_valid_from/to for flag and name changes."
+    columns:
+      - name: mmsi
+        tests: [not_null]

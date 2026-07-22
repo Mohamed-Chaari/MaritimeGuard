@@ -1,0 +1,79 @@
+services:
+  # Data lake (S3-compatible) — raw CSV landing
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER:-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:-admin12345}
+    ports: ["9000:9000", "9001:9001"]
+    volumes: ["minio_data:/data"]
+
+  # Metadata DB for Airflow / Superset / MLflow
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${PG_USER:-insight}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-insight}
+      POSTGRES_DB: ${PG_DB:-insightflow}
+    ports: ["5432:5432"]
+    volumes: ["pg_data:/var/lib/postgresql/data"]
+
+  # Orchestration (ELT) — runs dbt-duckdb against the shared warehouse file
+  airflow:
+    image: apache/airflow:2.10.2-python3.11
+    depends_on: [postgres, minio]
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${PG_USER:-insight}:${PG_PASSWORD:-insight}@postgres/${PG_DB:-insightflow}
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    ports: ["8080:8080"]
+    volumes:
+      - ./ingestion/airflow/dags:/opt/airflow/dags
+      - ./warehouse:/opt/warehouse           # dbt project + insightflow.duckdb live here
+    command: standalone
+
+  # Semantic / OLAP layer over DuckDB (the modern MDX)
+  cube:
+    image: cubejs/cube:latest
+    environment:
+      CUBEJS_DB_TYPE: duckdb
+      CUBEJS_DB_DUCK_DB_DATABASE_PATH: /warehouse/insightflow.duckdb
+      CUBEJS_DEV_MODE: "true"
+      CUBEJS_API_SECRET: ${CUBE_SECRET:-devsecret}
+    ports: ["4000:4000"]
+    volumes:
+      - ./olap/cube:/cube/conf
+      - ./warehouse:/warehouse:ro
+
+  # BI dashboards (connects to DuckDB via duckdb-engine)
+  superset:
+    image: apache/superset:latest
+    depends_on: [postgres]
+    environment:
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET:-devsecretkey}
+    ports: ["8088:8088"]
+    volumes: ["./warehouse:/warehouse"]
+
+  # ML experiment tracking
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    depends_on: [postgres]
+    command: >
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri postgresql://${PG_USER:-insight}:${PG_PASSWORD:-insight}@postgres/${PG_DB:-insightflow}
+    ports: ["5000:5000"]
+
+  # Serving API
+  api:
+    build: ./serving/api
+    depends_on: [mlflow]
+    environment:
+      DUCKDB_PATH: /warehouse/insightflow.duckdb
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    ports: ["8000:8000"]
+    volumes: ["./warehouse:/warehouse:ro"]
+
+volumes:
+  minio_data:
+  pg_data:

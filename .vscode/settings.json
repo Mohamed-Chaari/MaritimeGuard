@@ -1,0 +1,12 @@
+{
+  "python.defaultInterpreterPath": ".venv/bin/python",
+  "python.analysis.extraPaths": ["serving/api"],
+  "files.associations": { "*.sql": "jinja-sql" },
+  "[python]": { "editor.formatOnSave": false },
+  "search.exclude": {
+    "**/target": true,
+    "**/dbt_packages": true,
+    "**/.venv": true,
+    "**/logs": true
+  }
+}

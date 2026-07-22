@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MaritimeGuard AI — Live Vessel Map</title>
+<script src="https://unpkg.com/deck.gl@latest/dist.min.js"></script>
+<script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+<link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Inter', sans-serif; background: #0a0e17; color: #e0e6ed; overflow: hidden; }
+  #map { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+
+  /* Side panel */
+  .panel {
+    position: absolute; top: 16px; left: 16px; width: 360px;
+    background: rgba(10, 14, 23, 0.92); backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,0.08); border-radius: 16px;
+    padding: 24px; z-index: 10; max-height: calc(100vh - 32px); overflow-y: auto;
+  }
+  .panel h1 {
+    font-size: 20px; font-weight: 700; margin-bottom: 4px;
+    background: linear-gradient(135deg, #00d4ff, #7b61ff);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .panel .subtitle { font-size: 12px; color: #6b7a8d; margin-bottom: 20px; }
+
+  /* KPI cards */
+  .kpi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+  .kpi {
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 10px; padding: 12px;
+  }
+  .kpi .value { font-size: 22px; font-weight: 700; color: #00d4ff; }
+  .kpi .label { font-size: 11px; color: #6b7a8d; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  /* Anomaly alerts */
+  .alert-section h3 {
+    font-size: 13px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 1px; color: #ff6b6b; margin-bottom: 10px;
+  }
+  .alert {
+    background: rgba(255, 107, 107, 0.08); border: 1px solid rgba(255, 107, 107, 0.15);
+    border-radius: 8px; padding: 10px; margin-bottom: 8px; font-size: 12px;
+  }
+  .alert .risk { color: #ff6b6b; font-weight: 600; }
+
+  /* Ask section */
+  .ask-section { margin-top: 16px; }
+  .ask-section h3 {
+    font-size: 13px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 1px; color: #7b61ff; margin-bottom: 10px;
+  }
+  .ask-input {
+    width: 100%; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px; padding: 10px 12px; color: #e0e6ed; font-size: 13px;
+    font-family: 'Inter', sans-serif; outline: none; resize: none;
+  }
+  .ask-input:focus { border-color: #7b61ff; }
+  .ask-btn {
+    margin-top: 8px; width: 100%; padding: 10px; background: linear-gradient(135deg, #7b61ff, #00d4ff);
+    border: none; border-radius: 8px; color: white; font-weight: 600; cursor: pointer;
+    font-size: 13px; transition: opacity 0.2s;
+  }
+  .ask-btn:hover { opacity: 0.85; }
+  .ask-result {
+    margin-top: 10px; background: rgba(255,255,255,0.04); border-radius: 8px;
+    padding: 10px; font-size: 12px; max-height: 200px; overflow-y: auto;
+    display: none;
+  }
+
+  /* Connection status */
+  .status {
+    position: absolute; bottom: 16px; right: 16px; z-index: 10;
+    background: rgba(10, 14, 23, 0.9); backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.08); border-radius: 20px;
+    padding: 8px 16px; font-size: 12px; display: flex; align-items: center; gap: 8px;
+  }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%; background: #ff6b6b;
+    animation: pulse 2s infinite;
+  }
+  .status-dot.connected { background: #00d4ff; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  /* Legend */
+  .legend {
+    position: absolute; bottom: 16px; left: 16px; z-index: 10;
+    background: rgba(10, 14, 23, 0.9); backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.08); border-radius: 12px;
+    padding: 12px 16px; font-size: 11px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div class="panel">
+  <h1>🚢 MaritimeGuard AI</h1>
+  <p class="subtitle">Maritime Intelligence & Supply Chain Risk Platform</p>
+
+  <div class="kpi-grid">
+    <div class="kpi"><div class="value" id="kpi-vessels">—</div><div class="label">Vessels</div></div>
+    <div class="kpi"><div class="value" id="kpi-positions">—</div><div class="label">Positions</div></div>
+    <div class="kpi"><div class="value" id="kpi-ports">—</div><div class="label">Ports</div></div>
+    <div class="kpi"><div class="value" id="kpi-anomalies">—</div><div class="label">Anomalies</div></div>
+  </div>
+
+  <div class="alert-section">
+    <h3>⚠️ Recent AIS Anomalies</h3>
+    <div id="anomaly-list"><div class="alert">Loading...</div></div>
+  </div>
+
+  <div class="ask-section">
+    <h3>💬 Ask Your Data</h3>
+    <textarea class="ask-input" id="ask-input" rows="2"
+      placeholder="e.g., Which port had the most vessel calls?"></textarea>
+    <button class="ask-btn" onclick="askQuestion()">Ask MaritimeGuard</button>
+    <div class="ask-result" id="ask-result"></div>
+  </div>
+</div>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:#4a9eff"></div> Cargo</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#ff8c42"></div> Tanker</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#42f5a7"></div> Passenger</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#f5f542"></div> Fishing</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#ff4242"></div> Anomaly</div>
+</div>
+
+<div class="status">
+  <div class="status-dot" id="ws-dot"></div>
+  <span id="ws-status">Connecting...</span>
+</div>
+
+<script>
+const VESSEL_COLORS = {
+  'Cargo': [74, 158, 255], 'Tanker': [255, 140, 66], 'Passenger': [66, 245, 167],
+  'Fishing': [245, 245, 66], 'Tug': [180, 180, 180], 'High Speed Craft': [255, 66, 255],
+  'Sailing': [66, 200, 255], 'Pleasure Craft': [200, 130, 255],
+};
+const DEFAULT_COLOR = [120, 140, 160];
+const ANOMALY_COLOR = [255, 66, 66];
+
+let vesselData = [];
+let anomalyData = [];
+
+// --- Deck.gl Map ---
+const deckgl = new deck.DeckGL({
+  container: 'map',
+  mapStyle: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+  initialViewState: { longitude: -90, latitude: 27, zoom: 5, pitch: 30, bearing: 0 },
+  controller: true,
+  layers: [],
+});
+
+function getVesselColor(type) {
+  for (const [key, color] of Object.entries(VESSEL_COLORS)) {
+    if (type && type.includes(key)) return color;
+  }
+  return DEFAULT_COLOR;
+}
+
+function updateLayers() {
+  const vesselLayer = new deck.ScatterplotLayer({
+    id: 'vessels',
+    data: vesselData,
+    getPosition: d => [d.lon, d.lat],
+    getRadius: d => Math.max(3000, (d.sog || 1) * 500),
+    getFillColor: d => getVesselColor(d.type),
+    opacity: 0.8,
+    radiusMinPixels: 3,
+    radiusMaxPixels: 12,
+    pickable: true,
+  });
+
+  const anomalyLayer = new deck.ScatterplotLayer({
+    id: 'anomalies',
+    data: anomalyData,
+    getPosition: d => [d.lon, d.lat],
+    getRadius: 8000,
+    getFillColor: ANOMALY_COLOR,
+    opacity: 0.6,
+    radiusMinPixels: 5,
+    radiusMaxPixels: 15,
+    pickable: true,
+    stroked: true,
+    getLineColor: ANOMALY_COLOR,
+    lineWidthMinPixels: 2,
+  });
+
+  deckgl.setProps({ layers: [vesselLayer, anomalyLayer] });
+}
+
+// --- Fetch KPIs ---
+async function fetchKPIs() {
+  try {
+    const resp = await fetch('/kpis');
+    const data = await resp.json();
+    document.getElementById('kpi-vessels').textContent = (data.unique_vessels || 0).toLocaleString();
+    document.getElementById('kpi-positions').textContent = (data.total_positions || 0).toLocaleString();
+    document.getElementById('kpi-ports').textContent = (data.ports_tracked || 0).toLocaleString();
+    document.getElementById('kpi-anomalies').textContent = (data.ais_anomalies || 0).toLocaleString();
+  } catch (e) { console.error('KPI fetch failed:', e); }
+}
+
+// --- Fetch Anomalies ---
+async function fetchAnomalies() {
+  try {
+    const resp = await fetch('/anomalies/recent?limit=5');
+    const data = await resp.json();
+    anomalyData = data.map(a => ({ lat: a.lat, lon: a.lon })).filter(a => a.lat && a.lon);
+    const list = document.getElementById('anomaly-list');
+    if (data.length === 0) {
+      list.innerHTML = '<div class="alert">No anomalies detected</div>';
+    } else {
+      list.innerHTML = data.map(a => `
+        <div class="alert">
+          <strong>${a.type}</strong> — MMSI ${a.mmsi}<br>
+          Gap: ${a.gap_minutes}min · ${a.distance_nm?.toFixed(1) || '?'}nm
+          · <span class="risk">Risk: ${a.risk_score}</span>
+        </div>
+      `).join('');
+    }
+    updateLayers();
+  } catch (e) { console.error('Anomaly fetch failed:', e); }
+}
+
+// --- Ask Your Data ---
+async function askQuestion() {
+  const input = document.getElementById('ask-input');
+  const result = document.getElementById('ask-result');
+  const question = input.value.trim();
+  if (!question) return;
+
+  result.style.display = 'block';
+  result.innerHTML = '⏳ Querying...';
+
+  try {
+    const resp = await fetch('/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question }),
+    });
+    const data = await resp.json();
+    if (resp.ok) {
+      let html = `<p><strong>${data.explanation || ''}</strong></p>`;
+      html += `<pre style="font-size:11px;color:#7b61ff;overflow-x:auto">${data.sql}</pre>`;
+      if (data.rows && data.rows.length > 0) {
+        html += '<table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:8px">';
+        html += '<tr>' + data.columns.map(c => `<th style="text-align:left;padding:4px;border-bottom:1px solid rgba(255,255,255,0.1)">${c}</th>`).join('') + '</tr>';
+        data.rows.slice(0, 10).forEach(row => {
+          html += '<tr>' + row.map(v => `<td style="padding:4px">${v}</td>`).join('') + '</tr>';
+        });
+        html += '</table>';
+        if (data.row_count > 10) html += `<p style="color:#6b7a8d;margin-top:4px">${data.row_count} rows total</p>`;
+      }
+      result.innerHTML = html;
+    } else {
+      result.innerHTML = `<span style="color:#ff6b6b">${data.detail || 'Error'}</span>`;
+    }
+  } catch (e) {
+    result.innerHTML = `<span style="color:#ff6b6b">Connection error: ${e.message}</span>`;
+  }
+}
+
+// --- WebSocket ---
+function connectWS() {
+  const ws = new WebSocket(`ws://${location.host}/ws/live-vessels`);
+  const dot = document.getElementById('ws-dot');
+  const status = document.getElementById('ws-status');
+
+  ws.onopen = () => { dot.classList.add('connected'); status.textContent = 'Live'; };
+  ws.onclose = () => {
+    dot.classList.remove('connected'); status.textContent = 'Reconnecting...';
+    setTimeout(connectWS, 3000);
+  };
+  ws.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    if (data.type === 'vessel_tick' && data.vessels) {
+      vesselData = data.vessels.filter(v => v.lat && v.lon);
+      updateLayers();
+    }
+  };
+}
+
+// --- Init ---
+fetchKPIs();
+fetchAnomalies();
+connectWS();
+setInterval(fetchKPIs, 30000);
+setInterval(fetchAnomalies, 60000);
+
+// Allow Enter to submit
+document.getElementById('ask-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); askQuestion(); }
+});
+</script>
+</body>
+</html>
